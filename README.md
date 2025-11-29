@@ -1,11 +1,27 @@
-# 🗂️ DiskAPI - Файловая система на ASP.NET Core
+<div align="center">
+
+# 🗂️ DiskAPI
+
+### 🚀 RESTful API для управления файлами и папками на ASP.NET Core
+
+**Современный backend-сервис с Clean Architecture, модульной монолитной архитектурой и полной системой авторизации**
 
 [![.NET](https://img.shields.io/badge/.NET-9.0-512BD4?logo=dotnet)](https://dotnet.microsoft.com/)
 [![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16+-336791?logo=postgresql)](https://www.postgresql.org/)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Swagger](https://img.shields.io/badge/API-Swagger-85EA2D?logo=swagger)](http://localhost:8080/swagger)
+[![Architecture](https://img.shields.io/badge/Architecture-Clean%20Architecture-blue)](https://blog.cleancoder.com/uncle-bob/2012/08/13/the-clean-architecture.html)
 
-Современный RESTful API для управления файлами и папками, построенный на **Clean Architecture** с использованием модульной монолитной архитектуры.
+---
+
+### ✨ Ключевые возможности
+
+📁 **Управление файлами и папками** • 👥 **Система пользователей с ролями** • 🔐 **Cookie-based аутентификация**  
+📊 **Централизованное логирование** • 🔄 **Интеграция с Sentry** • 📝 **Swagger UI документация**
+
+---
+
+</div>
 
 ---
 
@@ -933,4 +949,5 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 Made with ❤️ using ASP.NET Core
 
 </div>
+
 
