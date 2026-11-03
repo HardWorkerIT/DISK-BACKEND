@@ -6,6 +6,7 @@ using App.Infrastructure.Data;
 using Common.Constants;
 using Common.DTOs;
 using Common.Extensions;
+using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.OpenApi.Models;
@@ -26,6 +27,7 @@ using Files.Application.Interfaces;
 using Files.Application.Services;
 using Common.Infrastructure.Services;
 using App.Infrastructure.Services;
+using App.Infrastructure.RateLimiting;
 
 // Загружаем переменные окружения из .env файла
 // Ищем файл .env в корне проекта, поднимаясь вверх от текущей директории
@@ -108,15 +110,50 @@ else
 builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)
     .AddCookie(options =>
     {
-        options.ExpireTimeSpan = TimeSpan.FromDays(200);
+        options.ExpireTimeSpan = TimeSpan.FromDays(14);
         options.SlidingExpiration = true;
         options.AccessDeniedPath = "/Forbidden/";
         options.Cookie.Name = Constants.AuthCookieName;
-        // options.Cookie.HttpOnly = true; // Prevent XSS attacks - cookie not accessible from JavaScript
-        // options.Cookie.SameSite = SameSiteMode.Lax; // CSRF protection
-        // options.Cookie.Secure = builder.Environment.IsProduction() 
-        //     ? CookieSecurePolicy.Always  // Require HTTPS in production
-        //     : CookieSecurePolicy.SameAsRequest; // Allow HTTP in development
+        options.Cookie.HttpOnly = true;
+        options.Cookie.SameSite = SameSiteMode.Lax;
+        options.Cookie.SecurePolicy = builder.Environment.IsDevelopment()
+            ? CookieSecurePolicy.SameAsRequest
+            : CookieSecurePolicy.Always;
+        options.Events.OnRedirectToLogin = context =>
+        {
+            context.Response.StatusCode = StatusCodes.Status401Unauthorized;
+            return Task.CompletedTask;
+        };
+        options.Events.OnRedirectToAccessDenied = context =>
+        {
+            context.Response.StatusCode = StatusCodes.Status403Forbidden;
+            return Task.CompletedTask;
+        };
+        options.Events.OnValidatePrincipal = async context =>
+        {
+            var token = context.Principal?.FindFirst("User")?.Value;
+            var userId = context.Principal?.FindFirst("UserId")?.Value;
+            var roleId = context.Principal?.FindFirst("RoleId")?.Value;
+            UserDTOWithoutPassword? user = null;
+            if (!string.IsNullOrEmpty(token))
+            {
+                try
+                {
+                    var accessService = context.HttpContext.RequestServices.GetRequiredService<IAccessService>();
+                    user = await accessService.IdentifyAsync(token, context.HttpContext.RequestAborted);
+                }
+                catch (ArgumentNullException)
+                {
+                    // A missing, expired or revoked token is an invalid session.
+                }
+            }
+
+            if (user is null || userId != user.Id.ToString() || roleId != user.RoleId.ToString())
+            {
+                context.RejectPrincipal();
+                await context.HttpContext.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
+            }
+        };
     });
 
 builder.Services.AddAuthorization(options =>
@@ -124,6 +161,8 @@ builder.Services.AddAuthorization(options =>
     // Разрешаем доступ к Swagger без авторизации
     options.FallbackPolicy = null; // Не требуем авторизацию по умолчанию
 });
+
+builder.Services.AddAuthenticationRateLimiting();
 
 // Add services to the container.
 // Регистрируем контроллеры из всех сборок
@@ -271,28 +310,28 @@ if (!string.IsNullOrEmpty(defaultConnectionString))
 else
 {
     // Формируем строку подключения из переменных окружения или значений по умолчанию
-    var dbHost = builder.Configuration["DB_HOST"] 
-        ?? Environment.GetEnvironmentVariable("DB_HOST") 
+    var dbHost = builder.Configuration["DB_HOST"]
+        ?? Environment.GetEnvironmentVariable("DB_HOST")
         ?? "localhost";
-    
-    var dbPort = builder.Configuration["DB_PORT"] 
-        ?? Environment.GetEnvironmentVariable("DB_PORT") 
+
+    var dbPort = builder.Configuration["DB_PORT"]
+        ?? Environment.GetEnvironmentVariable("DB_PORT")
         ?? "5432";
-    
-    var dbDatabase = builder.Configuration["DB_DATABASE"] 
-        ?? Environment.GetEnvironmentVariable("DB_DATABASE") 
+
+    var dbDatabase = builder.Configuration["DB_DATABASE"]
+        ?? Environment.GetEnvironmentVariable("DB_DATABASE")
         ?? "diskapi";  // Исправлено: было "standardbackend"
-    
-    var dbUsername = builder.Configuration["DB_USERNAME"] 
-        ?? Environment.GetEnvironmentVariable("DB_USERNAME") 
+
+    var dbUsername = builder.Configuration["DB_USERNAME"]
+        ?? Environment.GetEnvironmentVariable("DB_USERNAME")
         ?? "postgres";
-    
-    var dbPassword = builder.Configuration["DB_PASSWORD"] 
-        ?? Environment.GetEnvironmentVariable("DB_PASSWORD") 
+
+    var dbPassword = builder.Configuration["DB_PASSWORD"]
+        ?? Environment.GetEnvironmentVariable("DB_PASSWORD")
         ?? "postgres";
 
     connectionString = $"Host={dbHost};Port={dbPort};Database={dbDatabase};Username={dbUsername};Password={dbPassword}";
-    
+
     // Логируем используемые значения (без пароля)
     if (builder.Environment.IsDevelopment())
     {
@@ -309,7 +348,7 @@ else
 builder.Services.AddDbContext<AppDbContext>(options =>
 {
     options.UseNpgsql(connectionString);
-    
+
     if (builder.Environment.IsDevelopment())
     {
         // Включаем детальное логирование SQL запросов в режиме разработки
@@ -321,6 +360,8 @@ builder.Services.AddDbContext<AppDbContext>(options =>
 // Register IDbContext
 builder.Services.AddScoped<Common.Abstracts.IDbContext>(provider =>
     provider.GetRequiredService<AppDbContext>());
+builder.Services.AddSingleton<Common.Infrastructure.Metrics.HttpMetricsRegistry>();
+builder.Services.AddSingleton<App.Infrastructure.Storage.IFileStorage, App.Infrastructure.Storage.LocalFileStorage>();
 
 // Add module services
 builder.Services.AddScoped<IFileService, FileService>();
@@ -328,6 +369,7 @@ builder.Services.AddScoped<IFolderService, FolderService>();
 builder.Services.AddScoped<IUserService, UserService>();
 builder.Services.AddScoped<IAccessService, AccessService>();
 builder.Services.AddScoped<ILogService, LogService>();
+builder.Services.AddHostedService<TrashCleanupService>();
 
 // Add CORS
 builder.Services.AddCors(options =>
@@ -354,32 +396,32 @@ var logger = app.Services.GetRequiredService<ILogger<Program>>();
 using (var scope = app.Services.CreateScope())
 {
     var services = scope.ServiceProvider;
-    
+
     try
     {
         logger.LogInformation("🚀 Начало инициализации базы данных...");
-        
+
         var context = services.GetRequiredService<AppDbContext>();
         var configuration = services.GetRequiredService<IConfiguration>();
-        
+
         // Инициализация включает:
         // 1. Автоматическое применение всех ожидающих миграций
         // 2. Создание администратора, если его нет
         await DatabaseInitializer.InitializeAsync(context, configuration, logger);
-        
+
         logger.LogInformation("✅ Инициализация базы данных завершена успешно");
     }
     catch (Exception ex)
     {
         logger.LogCritical(ex, "❌ КРИТИЧЕСКАЯ ОШИБКА: Не удалось инициализировать базу данных");
         logger.LogError("Приложение не может быть запущено без инициализированной базы данных");
-        
+
         // В production окружении прерываем запуск приложения
         if (app.Environment.IsProduction())
         {
             throw;
         }
-        
+
         // В development окружении даём возможность продолжить (для отладки)
         logger.LogWarning("⚠️  Продолжение запуска в режиме разработки (база данных может быть недоступна)");
     }
@@ -422,17 +464,17 @@ app.UseSwaggerUI(options =>
     // Настраиваем путь к JSON спецификации
     // Используем относительный путь, который учитывает PathBase автоматически
     options.SwaggerEndpoint("v1/swagger.json", "Disk Backend API v1");
-    
+
     // Swagger UI будет доступен по пути /swagger
     options.RoutePrefix = "swagger";
-    
+
     // Настройки интерфейса
     options.DocumentTitle = "Disk Backend API Documentation";
     options.EnableDeepLinking();
     options.EnableFilter();
     options.DisplayRequestDuration();
     options.DisplayOperationId();
-    
+
     // Настройки по умолчанию
     options.DefaultModelsExpandDepth(2);
     options.DefaultModelExpandDepth(2);
@@ -446,9 +488,12 @@ if (!string.IsNullOrEmpty(sentryDsn))
     app.UseSentryTracing();
 }
 
+app.UseExceptionHandlingMiddleware();
+app.UseMiddleware<Common.Infrastructure.Middleware.HttpMetricsMiddleware>();
 app.UseHttpsRedirection();
 app.UseCors("AllowAll");
 app.UseRouting(); // Необходимо для доступа к endpoint metadata в middleware
+app.UseRateLimiter();
 app.UseAuthentication();
 app.UseAuthenticationMiddleware(); // Middleware для проверки авторизации (работает с атрибутом [RequireAuth])
 app.UseAuthorizationMiddleware(); // Middleware для проверки прав доступа на основе ролей (работает с атрибутом [RequireRole])

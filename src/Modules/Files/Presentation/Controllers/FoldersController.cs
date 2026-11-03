@@ -31,11 +31,11 @@ public class FoldersController : BaseController
     [HttpGet]
     [SwaggerResponse(200, "Список папок с файлами", typeof(PagedResponse<FolderDTO>))]
     [SwaggerResponse(400, "Ошибка валидации")]
-    public async Task<ActionResult<ApiResponse<PagedResponse<FolderDTO>>>> GetAsync([FromQuery(Name = "per_in_page")] int perInPage = 20, [FromQuery(Name = "page")] int page = 1)
+    public async Task<ActionResult<ApiResponse<PagedResponse<FolderDTO>>>> GetAsync([FromQuery(Name = "per_in_page")] int perInPage = 20, [FromQuery(Name = "page")] int page = 1, [FromQuery(Name = "parent_id")] long? parentId = null, [FromQuery(Name = "search")] string? search = null, [FromQuery(Name = "sort_by")] string sortBy = "id", [FromQuery(Name = "sort_direction")] string sortDirection = "asc")
     {
         using CancellationTokenSource cancellationTokenSource = new(Constants.BaseTimeout);
 
-        GetFolderRequest request = new(perInPage, page);
+        GetFolderRequest request = new(perInPage, page, parentId, search, sortBy, sortDirection);
 
         if (!ValidateRequest<GetFolderRequest, PagedResponse<FolderDTO>>(request, out var validationError))
             return validationError!;
@@ -140,5 +140,30 @@ public class FoldersController : BaseController
             cancellationTokenSource.Token);
 
         return Success(new DeleteFolderResponse(), "Папка успешно удалена");
+    }
+
+    [HttpGet("trash")]
+    [RequireAuth]
+    [RequireRole(EUserRoles.Moderator, EUserRoles.Admin)]
+    public async Task<ActionResult<ApiResponse<PagedResponse<FolderDTO>>>> GetTrashAsync([FromQuery] int page = 1, [FromQuery(Name = "per_in_page")] int perInPage = 20)
+    {
+        if (page is < 1 or > 1_000_000 || perInPage is < 1 or > 100)
+            return ValidationError<PagedResponse<FolderDTO>>(new Dictionary<string, string[]> { ["pagination"] = ["Параметры пагинации вне допустимого диапазона"] });
+        using var cts = CancellationTokenSource.CreateLinkedTokenSource(HttpContext.RequestAborted);
+        cts.CancelAfter(Constants.BaseTimeout);
+        var result = await _service.SelectTrashAsync(perInPage, page, cts.Token);
+        return Success(new PagedResponse<FolderDTO>(result.Items.Select(FolderMapper.GetBody), result.TotalCount, page, perInPage), "Корзина папок");
+    }
+
+    [HttpPost("{id:long}/restore")]
+    [RequireAuth]
+    [RequireRole(EUserRoles.Moderator, EUserRoles.Admin)]
+    public async Task<ActionResult<ApiResponse>> RestoreAsync(long id)
+    {
+        using var cts = CancellationTokenSource.CreateLinkedTokenSource(HttpContext.RequestAborted);
+        cts.CancelAfter(Constants.BaseTimeout);
+        if (!await _service.RestoreAsync(id, cts.Token))
+            return NotFound("Удалённая папка не найдена");
+        return Success(message: "Папка восстановлена");
     }
 }

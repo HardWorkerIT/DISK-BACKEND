@@ -35,9 +35,31 @@ public sealed class FileService(IDbContext context) : IFileService
 
     public async Task<PagedResponse<File>> SelectAsync(GetFileRequest request, CancellationToken cancellationToken)
     {
-        var (items, totalCount) = await _repository.GetWithCountAsync(x => x.FolderId == request.FolderId, request.PerInPage, request.Page, cancellationToken);
+        System.Linq.Expressions.Expression<Func<File, object>> orderBy = request.SortBy switch
+        {
+            "name" => x => x.Name,
+            "created_at" => x => x.CreatedAt,
+            _ => x => x.Id
+        };
+        var (items, totalCount) = await _repository.GetWithCountAsync(
+            x => x.FolderId == request.FolderId
+                && (string.IsNullOrWhiteSpace(request.Search) || x.Name.Contains(request.Search)),
+            request.PerInPage,
+            request.Page,
+            orderBy,
+            request.SortDirection == "desc",
+            cancellationToken);
         return new PagedResponse<File>(items, totalCount, request.Page, request.PerInPage);
     }
+
+    public async Task<PagedResponse<File>> SelectTrashAsync(int perInPage, int page, CancellationToken cancellationToken)
+    {
+        var (items, totalCount) = await _repository.GetDeletedWithCountAsync(perInPage, page, cancellationToken);
+        return new PagedResponse<File>(items, totalCount, page, perInPage);
+    }
+
+    public async Task<bool> RestoreAsync(long id, CancellationToken cancellationToken)
+        => await _repository.RestoreAsync(id, cancellationToken) is not null;
 
     public Task UpdateAsync(UpdateFileRequest request, CancellationToken cancellationToken)
     {

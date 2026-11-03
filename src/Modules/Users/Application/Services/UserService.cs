@@ -68,7 +68,7 @@ public class UserService(IDbContext context) : IUserService
             throw new ArgumentException("Пароль не может быть пустым");
         }
 
-        user.Password = EncryptExtension.EncryptSHA1(user.Password);
+        user.Password = PasswordHash.Create(user.Password);
 
         return await _repository.CreateAsync(user, cancellationToken);
     }

@@ -1,0 +1,66 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 9.0.x
+
+      - name: Restore
+        run: dotnet restore src/App/App.sln
+
+      - name: Build
+        run: dotnet build src/App/App.sln --configuration Release --no-restore
+
+      - name: Verify formatting for shared repository and tests
+        run: >-
+          dotnet format whitespace src/App/App.sln --verify-no-changes --no-restore
+          --include src/Common/Abstracts/IGenericRepository.cs
+          src/Common/Abstracts/GenericRepository.cs
+          src/Modules/Access/Application/Services/AccessService.cs
+          src/App/Controllers/AppFilesController.cs
+          src/App/Infrastructure/Services/TrashCleanupService.cs
+          src/App/Infrastructure/Storage/IFileStorage.cs
+          src/App/Infrastructure/Storage/LocalFileStorage.cs
+          src/App/Infrastructure/Storage/UploadFileValidator.cs
+          tests/DiskApi.Tests/UploadFileValidatorTests.cs
+          src/Common/Infrastructure/Metrics/HttpMetricsRegistry.cs
+          src/Common/Infrastructure/Middleware/HttpMetricsMiddleware.cs
+          src/App/Controllers/HealthController.cs
+          src/App/Program.cs
+          src/App/Infrastructure/RateLimiting/RateLimitingExtensions.cs
+          tests/DiskApi.Tests/HttpMetricsRegistryTests.cs
+          tests/DiskApi.Tests/AuthenticationRateLimitIntegrationTests.cs
+          tests/DiskApi.Tests/AccessControllerIntegrationTests.cs
+          src/Modules/Access/Application/Services/AccessService.cs
+          src/Common/Infrastructure/Middleware/ExceptionHandlingMiddleware.cs
+          tests/DiskApi.Tests/ExceptionHandlingMiddlewareTests.cs
+          tests/DiskApi.Tests/RepositoryTests.cs
+          tests/DiskApi.Tests/SessionManagementTests.cs
+          tests/DiskApi.Tests/LocalFileStorageTests.cs
+
+      - name: Verify analyzers
+        run: dotnet format analyzers src/App/App.sln --verify-no-changes --no-restore
+
+      - name: Test
+        run: dotnet test src/App/App.sln --configuration Release --no-build --no-restore
+
+      - name: Audit dependencies
+        run: dotnet list src/App/App.sln package --vulnerable --include-transitive
+
+      - name: Build container image
+        run: docker build --tag diskapi:ci .

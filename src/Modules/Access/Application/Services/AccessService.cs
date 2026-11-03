@@ -46,36 +46,15 @@ public sealed class AccessService(IDbContext context) : IAccessService
             throw new UserNotFoundException("Пользователь не найден");
         }
 
-        // Проверяем пароль
-        if (string.IsNullOrWhiteSpace(user.Password))
+        if (!PasswordHash.Verify(password, user.Password, out var needsUpgrade))
         {
             throw new InvalidPasswordException("Неверный пароль");
         }
 
-        string encryptedPassword;
-        try
+        if (needsUpgrade)
         {
-            encryptedPassword = EncryptExtension.EncryptSHA1(password);
-        }
-        catch (Exception ex)
-        {
-            throw new InvalidPasswordException("Ошибка при проверке пароля", ex);
-        }
-
-        // Проверяем, что зашифрованный пароль не пустой
-        if (string.IsNullOrWhiteSpace(encryptedPassword))
-        {
-            throw new InvalidPasswordException("Неверный пароль");
-        }
-
-        // Сравниваем хеши без учета регистра, так как в БД может быть разный регистр
-        // Используем Trim() для удаления возможных пробелов
-        string dbPassword = (user.Password ?? string.Empty).Trim();
-        string inputPassword = encryptedPassword.Trim();
-
-        if (!string.Equals(dbPassword, inputPassword, StringComparison.OrdinalIgnoreCase))
-        {
-            throw new InvalidPasswordException("Неверный пароль");
+            user.Password = PasswordHash.Create(password);
+            await _userRepository.UpdateAsync(user, cancellationToken);
         }
 
         // Если мы дошли сюда, значит пароль правильный
@@ -87,24 +66,65 @@ public sealed class AccessService(IDbContext context) : IAccessService
             CreatedAt = DateTimeOffset.UtcNow,
         };
 
-        try
-        {
-            return await _tokenRepository.CreateAsync(accessToken, cancellationToken);
-        }
-        catch (Exception ex)
-        {
-            // Если ошибка при создании токена, это не ошибка пароля
-            // Пробрасываем как есть, чтобы не маскировать реальную проблему
-            throw;
-        }
+        return await _tokenRepository.CreateAsync(accessToken, cancellationToken)
+            ?? throw new InvalidOperationException("Не удалось создать токен доступа");
+    }
+
+    public async Task RevokeAsync(string token, CancellationToken cancellationToken)
+    {
+        var accessToken = await _tokenRepository.FirstOrDefaultAsync(x => x.Token == token, cancellationToken);
+        if (accessToken is not null)
+            await _tokenRepository.RemoveAsync(accessToken, cancellationToken);
+    }
+
+    public async Task ChangePasswordAsync(long userId, string currentPassword, string newPassword, CancellationToken cancellationToken)
+    {
+        var user = await _userRepository.FindByIdAsync(userId, cancellationToken)
+            ?? throw new UserNotFoundException("Пользователь не найден");
+        if (!PasswordHash.Verify(currentPassword, user.Password, out _))
+            throw new InvalidPasswordException("Текущий пароль неверен");
+
+        user.Password = PasswordHash.Create(newPassword);
+        await _userRepository.UpdateAsync(user, cancellationToken);
+
+        var activeTokens = await _tokenRepository.GetAsync(x => x.UserId == userId, cancellationToken);
+        foreach (var token in activeTokens)
+            await _tokenRepository.RemoveAsync(token, cancellationToken);
+    }
+
+    public async Task<IReadOnlyList<AccessToken>> GetActiveSessionsAsync(long userId, CancellationToken cancellationToken)
+    {
+        var now = DateTimeOffset.UtcNow;
+        var sessions = await _tokenRepository.GetAsync(
+            x => x.UserId == userId && x.ExpiredAt > now,
+            cancellationToken);
+        return sessions.OrderByDescending(x => x.CreatedAt).ToList();
+    }
+
+    public async Task<bool> RevokeSessionAsync(long userId, long sessionId, CancellationToken cancellationToken)
+    {
+        var session = await _tokenRepository.FirstOrDefaultAsync(
+            x => x.Id == sessionId && x.UserId == userId,
+            cancellationToken);
+        if (session is null)
+            return false;
+
+        await _tokenRepository.RemoveAsync(session, cancellationToken);
+        return true;
+    }
+
+    public async Task RevokeAllSessionsAsync(long userId, CancellationToken cancellationToken)
+    {
+        await _tokenRepository.RemoveWhereAsync(x => x.UserId == userId, cancellationToken);
     }
 
     public async Task<UserDTOWithoutPassword> IdentifyAsync(string token, CancellationToken cancellationToken)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(token);
 
+        var now = DateTimeOffset.UtcNow;
         AccessToken? accessToken = await _tokenRepository.FirstOrDefaultAsync(
-           x => x.Token == token && x.ExpiredAt > DateTimeOffset.UtcNow && x.DeletedAt == default, cancellationToken);
+           x => x.Token == token && x.ExpiredAt > now && x.DeletedAt == default, cancellationToken);
 
         ArgumentNullException.ThrowIfNull(accessToken);
 

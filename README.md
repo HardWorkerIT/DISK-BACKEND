@@ -557,7 +557,7 @@ docker-compose up -d
 
 ### Автоматическое создание администратора
 
-При первом запуске приложения автоматически создается администратор с учетными данными по умолчанию:
+При первом запуске приложения создаётся администратор. Указанные ниже значения по умолчанию предназначены только для Development; вне Development необходимо задать `ADMIN_PASSWORD` через конфигурацию.
 
 **Учетные данные по умолчанию:**
 - **Login:** `admin`
@@ -634,7 +634,7 @@ curl -X POST "http://localhost:8080/st/api/v1/users" \
 | `SENTRY_DSN` | DSN для Sentry | `` |
 | `LOG_LEVEL` | Уровень логирования | `ERROR` |
 | `ADMIN_LOGIN` | Логин администратора (при первом запуске) | `admin` |
-| `ADMIN_PASSWORD` | Пароль администратора (при первом запуске) | `admin123` |
+| `ADMIN_PASSWORD` | Пароль администратора (при первом запуске) | `admin123` только в Development; обязателен в остальных окружениях |
 | `ADMIN_EMAIL` | Email администратора (при первом запуске) | `admin@diskapi.local` |
 | `ADMIN_USERNAME` | Имя администратора (при первом запуске) | `Администратор Системы` |
 
@@ -721,6 +721,8 @@ http://localhost:8080/swagger
 | Метод | Endpoint | Описание | Авторизация |
 |-------|----------|----------|-------------|
 | GET | `/` | Health check | ❌ |
+| GET | `/health/live` | Процесс отвечает | ❌ |
+| GET | `/health/ready` | Проверка подключения к PostgreSQL (503 при недоступности) | ❌ |
 
 ### Примеры запросов
 
@@ -790,40 +792,14 @@ curl -X GET "http://localhost:8080/st/api/v1/files?group_id=1&per_in_page=20&pag
 
 ## 🔒 Безопасность
 
-### Аутентификация
+### Аутентификация и пароли
 
-- **Cookie-based** аутентификация с настраиваемым временем жизни
-- Токены хранятся в защищенной куке `AuthCookie`
-- Автоматическое продление сессии (sliding expiration)
-
-### Хеширование паролей
-
-```csharp
-public static class HashExtension
-{
-    public static string ComputeSHA256Hash(this string input)
-    {
-        using var sha256 = SHA256.Create();
-        byte[] bytes = Encoding.UTF8.GetBytes(input);
-        byte[] hash = sha256.ComputeHash(bytes);
-        return Convert.ToBase64String(hash);
-    }
-}
-```
-
-### Middleware защиты
-
-1. **AuthenticationMiddleware** - проверяет наличие и валидность токена
-2. **AuthorizationMiddleware** - проверяет права доступа на основе ролей
-3. **CORS Policy** - настроенная политика кросс-доменных запросов
-
-### Best Practices
-
-- ✅ Пароли хешируются с использованием SHA256
-- ✅ Используется HTTPS в production
-- ✅ Настроена защита от CSRF
-- ✅ Интеграция с Sentry для мониторинга безопасности
-- ✅ Логирование всех важных операций
+- Cookie-based сессия: HttpOnly, SameSite=Lax, Secure вне Development, срок 14 дней с продлением.
+- Защищённые API возвращают HTTP 401/403 вместо перенаправления на HTML-страницы.
+- Новые пароли хранятся как PBKDF2-SHA256 с уникальной случайной солью.
+- Существующие SHA-1 хеши обновляются автоматически после успешного входа пользователя.
+- Установите `ADMIN_LOGIN`, `ADMIN_PASSWORD` и `ADMIN_EMAIL` через секреты окружения при развёртывании.
+- Подробности конфигурации и ограничений безопасности: [SECURITY.md](SECURITY.md).
 
 ---
 
@@ -854,10 +830,30 @@ dotnet ef migrations add MigrationName
 dotnet ef database update
 ```
 
+### Безопасное применение миграций
+
+Перед обновлением существующей базы сделайте проверенную резервную копию и выполните предварительные запросы ниже. Первые миграции добавляют уникальные индексы для активных логинов/email и токенов, поэтому дубликаты остановят обновление:
+
+```sql
+SELECT login, count(*) FROM users WHERE deleted_at IS NULL GROUP BY login HAVING count(*) > 1;
+SELECT email, count(*) FROM users WHERE deleted_at IS NULL AND email IS NOT NULL GROUP BY email HAVING count(*) > 1;
+SELECT token, count(*) FROM tokens WHERE token IS NOT NULL GROUP BY token HAVING count(*) > 1;
+```
+
+Если запросы вернули строки, разрешите конфликты по бизнес-правилам до запуска миграции. Затем примените миграции из каталога приложения:
+
+```bash
+cd src/App
+dotnet ef migrations list
+dotnet ef database update
+```
+
+Для чистой базы используйте тот же `database update`: EF Core применит миграции по порядку. Для отката индексов переключитесь на предыдущую миграцию из `migrations list` с помощью `dotnet ef database update <PreviousMigration>`. Это выполнит `Down` последующих миграций; сделайте отдельную резервную копию перед откатом. Применение и откат в этой среде не запускались, поскольку PostgreSQL недоступен.
+
 ### Запуск тестов
 
 ```bash
-dotnet test
+dotnet test src/App/App.sln
 ```
 
 ### Code Style
@@ -923,6 +919,50 @@ Contributions are welcome! Please feel free to submit a Pull Request.
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
 ---
+
+## 🚀 Portfolio demo
+
+### Архитектура данных
+
+```mermaid
+erDiagram
+    USERS ||--o{ TOKENS : authenticates
+    FOLDERS ||--o{ FILES : contains
+    FILES ||--o| APP_FILES : stores
+    USERS ||--o{ LOGS : performs
+```
+
+The API is a modular monolith: `Access`, `Files`, and `Users` modules hold feature code; `Common` contains shared contracts and middleware; `App` composes modules and PostgreSQL infrastructure.
+
+Uploaded content is written through the `IFileStorage` abstraction. The default `LocalFileStorage` stores files under the application content root at `uploads/files`, streams downloads with HTTP range support, and rejects keys that escape that directory.
+
+### Reproducible demo
+
+Start the development stack with `docker compose up --build`, then open Swagger at `http://localhost:8080/st/swagger`. The local Development seed account is `admin` / `admin123`; change it before exposing the service beyond a local machine.
+
+Useful checks:
+
+```powershell
+dotnet build src/App/App.sln
+dotnet test src/App/App.sln
+```
+
+Readiness endpoints are `/st/health/live` and `/st/health/ready`; Prometheus text metrics are exposed at `/st/metrics`; Prometheus text metrics are exposed at `/st/metrics`. File and folder lists support bounded pagination, name search, and whitelisted sorting. File query parameters are `group_id` (required), `search` (up to 100 characters), `sort_by` (`id`, `name`, or `created_at`) and `sort_direction` (`asc` or `desc`). Folder lists accept `parent_id`, `search`, `sort_by` (`id` or `name`) and `sort_direction` (`asc` or `desc`). Sorting defaults to `id` ascending; unsupported sort fields or directions return a validation error. Examples:
+
+```text
+/st/api/v1/files?group_id=1&page=1&per_in_page=20&search=report&sort_by=created_at&sort_direction=desc
+/st/api/v1/files/folders?parent_id=1&search=work&sort_by=name&sort_direction=asc
+```
+
+### Demo scenarios
+
+1. Start the local stack, sign in through `/st/api/v1/access/authentificate`, and use the returned `AuthCookie` for protected operations.
+2. Create a folder, upload a supported document through `/st/api/v1/upload/files`, then list files with search and sort parameters.
+3. Download the uploaded file by UUID. The download endpoint streams content and supports byte ranges, so `curl -H "Range: bytes=0-1023"` demonstrates partial download.
+4. Delete a file, inspect `/st/api/v1/files/trash`, and restore it with `/st/api/v1/files/{id}/restore`.
+5. Check `/st/health/live` and `/st/health/ready` to distinguish process health from PostgreSQL readiness.
+
+The seed credentials and sample secrets above are for local Development only. Replace them and configure real secrets before deployment. The remaining roadmap items and verification limitations are tracked in [PROJECT_ROADMAP.md](PROJECT_ROADMAP.md).
 
 ## 👨‍💻 Автор
 

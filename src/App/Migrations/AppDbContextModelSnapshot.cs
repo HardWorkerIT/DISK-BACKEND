@@ -91,6 +91,13 @@ namespace App.Infrastructure.Data.Migrations
                     b.HasIndex("UserId")
                         .HasDatabaseName("IX_tokens_user_id");
 
+                    b.HasIndex("UserId", "ExpiredAt")
+                        .HasDatabaseName("IX_tokens_user_expired_at");
+
+                    b.HasIndex("Token")
+                        .IsUnique()
+                        .HasDatabaseName("UX_tokens_token");
+
                     b.ToTable("tokens", (string)null);
                 });
 
@@ -188,6 +195,9 @@ namespace App.Infrastructure.Data.Migrations
                     b.HasIndex("FolderId")
                         .HasDatabaseName("IX_files_folder_id");
 
+                    b.HasIndex("FolderId", "DeletedAt")
+                        .HasDatabaseName("IX_files_folder_deleted_at");
+
                     b.ToTable("files", (string)null);
                 });
 
@@ -217,6 +227,9 @@ namespace App.Infrastructure.Data.Migrations
 
                     b.HasIndex("ParentId")
                         .HasDatabaseName("IX_folders_parent_id");
+
+                    b.HasIndex("ParentId", "DeletedAt")
+                        .HasDatabaseName("IX_folders_parent_deleted_at");
 
                     b.ToTable("folders", (string)null);
                 });
@@ -256,6 +269,16 @@ namespace App.Infrastructure.Data.Migrations
 
                     b.HasKey("Id")
                         .HasName("PK_users");
+
+                    b.HasIndex("Email")
+                        .IsUnique()
+                        .HasDatabaseName("UX_users_active_email")
+                        .HasFilter("deleted_at IS NULL AND email IS NOT NULL");
+
+                    b.HasIndex("Login")
+                        .IsUnique()
+                        .HasDatabaseName("UX_users_active_login")
+                        .HasFilter("deleted_at IS NULL");
 
                     b.ToTable("users", (string)null);
                 });

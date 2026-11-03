@@ -30,5 +30,9 @@ EXPOSE 8081
 # Copy published app
 COPY --from=publish /app/publish .
 
+# Run the API without root privileges.
+RUN mkdir -p /app/uploads/files && chown -R $APP_UID /app
+USER $APP_UID
+
 ENTRYPOINT ["dotnet", "App.dll"]
 

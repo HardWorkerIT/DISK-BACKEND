@@ -14,7 +14,6 @@ public class AppDbContext : DbContext, IDbContext
 {
     public AppDbContext(DbContextOptions<AppDbContext> options) : base(options)
     {
-        Database.EnsureCreated();
     }
 
     public DbSet<AppFile> AppFiles { get; set; } = default!;
@@ -45,6 +44,8 @@ public class AppDbContext : DbContext, IDbContext
             
             // Альтернативный ключ для связи с AppFile
             entity.HasAlternateKey(e => e.Uuid);
+            entity.HasIndex(e => new { e.FolderId, e.DeletedAt })
+                .HasDatabaseName("IX_files_folder_deleted_at");
             
             // Связь File -> Folder (многие к одному)
             entity.HasOne<Folder>()
@@ -62,6 +63,8 @@ public class AppDbContext : DbContext, IDbContext
             entity.Property(e => e.ParentId).HasColumnName("parent_id");
             entity.Property(e => e.Name).HasColumnName("group_name");
             entity.Property(e => e.DeletedAt).HasColumnName("deleted_at");
+            entity.HasIndex(e => new { e.ParentId, e.DeletedAt })
+                .HasDatabaseName("IX_folders_parent_deleted_at");
             
             // Самореферентная связь Folder -> Folder (иерархия папок)
             entity.HasOne<Folder>()
@@ -82,6 +85,14 @@ public class AppDbContext : DbContext, IDbContext
             entity.Property(e => e.Password).HasColumnName("password");
             entity.Property(e => e.DeletedAt).HasColumnName("deleted_at");
             entity.Property(e => e.RoleId).HasColumnName("role_id");
+            entity.HasIndex(e => e.Login)
+                .IsUnique()
+                .HasFilter("deleted_at IS NULL")
+                .HasDatabaseName("UX_users_active_login");
+            entity.HasIndex(e => e.Email)
+                .IsUnique()
+                .HasFilter("deleted_at IS NULL AND email IS NOT NULL")
+                .HasDatabaseName("UX_users_active_email");
         });
 
         // Настройка сущности AccessToken
@@ -95,6 +106,9 @@ public class AppDbContext : DbContext, IDbContext
             entity.Property(e => e.ExpiredAt).HasColumnName("expired_at");
             entity.Property(e => e.DeletedAt).HasColumnName("deleted_at");
             entity.Property(e => e.CreatedAt).HasColumnName("created_at");
+            entity.HasIndex(e => new { e.UserId, e.ExpiredAt })
+                .HasDatabaseName("IX_tokens_user_expired_at");
+            entity.HasIndex(e => e.Token).IsUnique().HasDatabaseName("UX_tokens_token");
             
             // Связь AccessToken -> User (многие к одному)
             entity.HasOne<User>()

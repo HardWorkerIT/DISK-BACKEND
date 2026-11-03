@@ -34,9 +34,30 @@ public sealed class FolderService(IDbContext context) : IFolderService
 
     public async Task<PagedResponse<Folder>> SelectAsync(GetFolderRequest request, CancellationToken cancellationToken)
     {
-        var (items, totalCount) = await _repository.GetWithCountAsync(request.PerInPage, request.Page, cancellationToken);
+        System.Linq.Expressions.Expression<Func<Folder, object>> orderBy = request.SortBy switch
+        {
+            "name" => x => x.Name,
+            _ => x => x.Id
+        };
+        var (items, totalCount) = await _repository.GetWithCountAsync(
+            x => (!request.ParentId.HasValue || x.ParentId == request.ParentId)
+                && (string.IsNullOrWhiteSpace(request.Search) || x.Name.Contains(request.Search)),
+            request.PerInPage,
+            request.Page,
+            orderBy,
+            request.SortDirection == "desc",
+            cancellationToken);
         return new PagedResponse<Folder>(items, totalCount, request.Page, request.PerInPage);
     }
+
+    public async Task<PagedResponse<Folder>> SelectTrashAsync(int perInPage, int page, CancellationToken cancellationToken)
+    {
+        var (items, totalCount) = await _repository.GetDeletedWithCountAsync(perInPage, page, cancellationToken);
+        return new PagedResponse<Folder>(items, totalCount, page, perInPage);
+    }
+
+    public async Task<bool> RestoreAsync(long id, CancellationToken cancellationToken)
+        => await _repository.RestoreAsync(id, cancellationToken) is not null;
 
     public Task UpdateAsync(UpdateFolderRequest request, CancellationToken cancellationToken)
     {

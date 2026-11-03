@@ -16,4 +16,6 @@ public interface IFileService
     Task<PagedResponse<File>> SelectAsync(GetFileRequest request, CancellationToken cancellationToken);
     Task UpdateAsync(UpdateFileRequest request, CancellationToken cancellationToken);
     Task DeleteAsync(DeleteFileRequest request, CancellationToken cancellationToken);
+    Task<PagedResponse<File>> SelectTrashAsync(int perInPage, int page, CancellationToken cancellationToken);
+    Task<bool> RestoreAsync(long id, CancellationToken cancellationToken);
 }

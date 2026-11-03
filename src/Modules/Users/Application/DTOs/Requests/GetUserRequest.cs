@@ -18,7 +18,7 @@ public class GetUserRequest(int perInPage, int page) : BasePerInPageRequest
     public new int PerInPage { get; set; } = perInPage;
 
     [Required(ErrorMessage = "Page обязателен")]
-    [Range(0, int.MaxValue, ErrorMessage = "Page должен быть больше или равен 0")]
+    [Range(1, 1000000, ErrorMessage = "Page должен быть от 1 до 1000000")]
     [SwaggerSchema(Description = "Номер страницы (начиная с 0)")]
     public new int Page { get; set; } = page;
 }

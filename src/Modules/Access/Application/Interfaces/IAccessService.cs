@@ -15,4 +15,9 @@ public interface IAccessService
 {
     Task<AccessToken> AuthentificateAsync(string? login, string? password, CancellationToken cancellationToken);
     Task<UserDTOWithoutPassword> IdentifyAsync(string token, CancellationToken cancellationToken);
+    Task RevokeAsync(string token, CancellationToken cancellationToken);
+    Task ChangePasswordAsync(long userId, string currentPassword, string newPassword, CancellationToken cancellationToken);
+    Task<IReadOnlyList<AccessToken>> GetActiveSessionsAsync(long userId, CancellationToken cancellationToken);
+    Task<bool> RevokeSessionAsync(long userId, long sessionId, CancellationToken cancellationToken);
+    Task RevokeAllSessionsAsync(long userId, CancellationToken cancellationToken);
 }

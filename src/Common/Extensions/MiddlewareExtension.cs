@@ -8,6 +8,11 @@ namespace Common.Extensions;
 /// </summary>
 public static class MiddlewareExtensions
 {
+    public static IApplicationBuilder UseExceptionHandlingMiddleware(this IApplicationBuilder builder)
+    {
+        return builder.UseMiddleware<ExceptionHandlingMiddleware>();
+    }
+
     /// <summary>
     /// Добавляет middleware для проверки авторизации
     /// </summary>

@@ -108,9 +108,19 @@ public static class DatabaseInitializer
                 ?? Environment.GetEnvironmentVariable("ADMIN_LOGIN") 
                 ?? "admin";
             
-            var adminPassword = configuration?["ADMIN_PASSWORD"] 
-                ?? Environment.GetEnvironmentVariable("ADMIN_PASSWORD") 
-                ?? "admin123";
+            var configuredAdminPassword = configuration?["ADMIN_PASSWORD"]
+                ?? Environment.GetEnvironmentVariable("ADMIN_PASSWORD");
+            var isDevelopment = string.Equals(
+                configuration?["ASPNETCORE_ENVIRONMENT"] ?? Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT"),
+                "Development",
+                StringComparison.OrdinalIgnoreCase);
+
+            if (string.IsNullOrWhiteSpace(configuredAdminPassword) && !isDevelopment)
+            {
+                throw new InvalidOperationException("ADMIN_PASSWORD must be configured outside the Development environment.");
+            }
+
+            var adminPassword = configuredAdminPassword ?? "admin123";
             
             var adminEmail = configuration?["ADMIN_EMAIL"] 
                 ?? Environment.GetEnvironmentVariable("ADMIN_EMAIL") 
@@ -126,7 +136,7 @@ public static class DatabaseInitializer
                 Login = adminLogin,
                 Email = adminEmail,
                 Username = adminUsername,
-                Password = EncryptExtension.EncryptSHA1(adminPassword), // Хешируем пароль
+                Password = PasswordHash.Create(adminPassword),
                 RoleId = (int)UserRoles.Admin
             };
 
@@ -137,7 +147,7 @@ public static class DatabaseInitializer
             logger?.LogInformation("║     ✅ Администратор успешно создан!                       ║");
             logger?.LogInformation("╚═══════════════════════════════════════════════════════════╝");
             logger?.LogInformation("   Login:    {Login}", adminLogin);
-            logger?.LogInformation("   Password: {Password}", adminPassword);
+            logger?.LogInformation("   Password: задан через конфигурацию и не выводится в лог");
             logger?.LogInformation("   Email:    {Email}", adminEmail);
             logger?.LogInformation("   Username: {Username}", adminUsername);
             logger?.LogInformation("   Role:     Admin");

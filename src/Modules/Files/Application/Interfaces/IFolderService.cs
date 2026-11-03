@@ -15,4 +15,6 @@ public interface IFolderService
     Task<PagedResponse<Folder>> SelectAsync(GetFolderRequest request, CancellationToken cancellationToken);
     Task UpdateAsync(UpdateFolderRequest request, CancellationToken cancellationToken);
     Task DeleteAsync(DeleteFolderRequest request, CancellationToken cancellationToken);
+    Task<PagedResponse<Folder>> SelectTrashAsync(int perInPage, int page, CancellationToken cancellationToken);
+    Task<bool> RestoreAsync(long id, CancellationToken cancellationToken);
 }

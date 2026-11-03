@@ -8,10 +8,14 @@ public interface IGenericRepository<TEntity> where TEntity : BaseEntity
     ValueTask<TEntity?> FindByIdAsync(long id, CancellationToken cancellationToken);
     Task<IEnumerable<TEntity>> GetAsync(int perInPage, int page, CancellationToken cancellationToken);
     Task<(IEnumerable<TEntity> Items, int TotalCount)> GetWithCountAsync(int perInPage, int page, CancellationToken cancellationToken);
-    Task<IEnumerable<TEntity>> GetAsync(Func<TEntity, bool> predicate, CancellationToken cancellationToken);
-    Task<IEnumerable<TEntity>> GetAsync(Func<TEntity, bool> predicate, int perInPage, int page, CancellationToken cancellationToken);
-    Task<(IEnumerable<TEntity> Items, int TotalCount)> GetWithCountAsync(Func<TEntity, bool> predicate, int perInPage, int page, CancellationToken cancellationToken);
-    Task<TEntity?> FirstOrDefaultAsync(Func<TEntity, bool> predicate, CancellationToken cancellationToken);
+    Task<(IEnumerable<TEntity> Items, int TotalCount)> GetDeletedWithCountAsync(int perInPage, int page, CancellationToken cancellationToken);
+    Task<IEnumerable<TEntity>> GetAsync(System.Linq.Expressions.Expression<Func<TEntity, bool>> predicate, CancellationToken cancellationToken);
+    Task<IEnumerable<TEntity>> GetAsync(System.Linq.Expressions.Expression<Func<TEntity, bool>> predicate, int perInPage, int page, CancellationToken cancellationToken);
+    Task<(IEnumerable<TEntity> Items, int TotalCount)> GetWithCountAsync(System.Linq.Expressions.Expression<Func<TEntity, bool>> predicate, int perInPage, int page, CancellationToken cancellationToken);
+    Task<(IEnumerable<TEntity> Items, int TotalCount)> GetWithCountAsync<TOrder>(System.Linq.Expressions.Expression<Func<TEntity, bool>> predicate, int perInPage, int page, System.Linq.Expressions.Expression<Func<TEntity, TOrder>> orderBy, bool descending, CancellationToken cancellationToken);
+    Task<TEntity?> FirstOrDefaultAsync(System.Linq.Expressions.Expression<Func<TEntity, bool>> predicate, CancellationToken cancellationToken);
     Task RemoveAsync(TEntity item, CancellationToken cancellationToken);
+    Task<int> RemoveWhereAsync(System.Linq.Expressions.Expression<Func<TEntity, bool>> predicate, CancellationToken cancellationToken);
+    Task<TEntity?> RestoreAsync(long id, CancellationToken cancellationToken);
     Task UpdateAsync(TEntity item, CancellationToken cancellationToken);
 }
